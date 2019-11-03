@@ -1,0 +1,82 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(GEOquery)
+library(Biobase)
+```
+
+## Download soft files from GEO
+
+```{r}
+gse <- getGEO(filename = "./data/GSE48963_RAW/GSE48963_family.soft")
+```
+
+```{r}
+samples_ids <- Meta(gse)$sample_id
+samples_info <- data.frame(matrix(ncol = 4, nrow = 0))
+colnames(samples_info) <- c("sample_id", "sample_name", "library_strategy", "source_name_ch1")
+
+for(sample_id in samples_ids) {
+  gsm_meta <- Meta(getGEO(sample_id))
+  samples_info <- samples_info %>%
+    add_row(
+      sample_id = sample_id,
+      sample_name = gsm_meta$title,
+      library_strategy = gsm_meta$library_strategy,
+      source_name_ch1 = gsm_meta$source_name_ch1
+    )
+}
+```
+
+## Filter samples
+Select RNA-seq samples, 12 weeks
+.
+```{r}
+samples_rna_12 <- samples_info %>%
+  separate(source_name_ch1, c("genotype", "tissue", "age"), ", ") %>%
+  mutate(genotype = ifelse(genotype == "R6/2", "HD", "WT")) %>%
+  filter(library_strategy == "RNA-Seq", age == "12 weeks") %>%
+  select(-c(library_strategy, age))
+samples_rna_12
+```
+
+## Prepare data
+
+```{r}
+SAMPLES_FOLDER = "./data/GSE48963_RAW/"
+
+read_counts <- function(sample_info) {
+  file_path <- paste(
+    SAMPLES_FOLDER,
+    sample_info[1, "sample_id"], 
+    "_",
+    sample_info[1, "sample_name"],
+    ".combined.rpkm",
+  sep = "")
+  
+  return (
+    read.table(file_path, sep = "\t", row.names = 1) %>%
+      select(V2) %>%
+      rename(!!sample_info[1, "sample_name"] := V2)
+  )
+}
+
+total_counts <- read_counts(samples_rna_12[1, ])
+
+for(i in 2:nrow(samples_rna_12)) {
+  sample_counts <- read_counts(samples_rna_12[i, ])
+  
+  total_counts <- merge(total_counts, sample_counts, by = 0, all = TRUE)
+  rownames(total_counts) = total_counts[, "Row.names"]
+  total_counts <- total_counts %>% select(-Row.names)
+}
+```
+
+```{r}
+
+```
+

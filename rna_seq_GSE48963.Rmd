@@ -16,18 +16,17 @@ gse <- getGEO(filename = "./data/GSE48963_RAW/GSE48963_family.soft")
 ```
 
 ```{r}
-samples_ids <- Meta(gse)$sample_id
 samples_info <- data.frame(matrix(ncol = 4, nrow = 0))
-colnames(samples_info) <- c("sample_id", "sample_name", "library_strategy", "source_name_ch1")
+colnames(samples_info) <- c("geo_accession", "title", "library_strategy", "source_name_ch1")
 
-for(sample_id in samples_ids) {
-  gsm_meta <- Meta(getGEO(sample_id))
+for(gsm in GSMList(gse)) {
+  gsm_meta <- Meta(gsm)
   samples_info <- samples_info %>%
     add_row(
-      sample_id = sample_id,
-      sample_name = gsm_meta$title,
+      geo_accession    = gsm_meta$geo_accession,
+      title            = gsm_meta$title,
       library_strategy = gsm_meta$library_strategy,
-      source_name_ch1 = gsm_meta$source_name_ch1
+      source_name_ch1  = gsm_meta$source_name_ch1
     )
 }
 ```
@@ -50,18 +49,12 @@ samples_rna_12
 SAMPLES_FOLDER = "./data/GSE48963_RAW/"
 
 read_counts <- function(sample_info) {
-  file_path <- paste(
-    SAMPLES_FOLDER,
-    sample_info[1, "sample_id"], 
-    "_",
-    sample_info[1, "sample_name"],
-    ".combined.rpkm",
-  sep = "")
+  file_path <- paste(SAMPLES_FOLDER, sample_info$geo_accession, "_", sample_info$title, ".combined.rpkm", sep = "")
   
   return (
     read.table(file_path, sep = "\t", row.names = 1) %>%
       select(V2) %>%
-      rename(!!sample_info[1, "sample_name"] := V2)
+      rename(!!sample_info$title := V2)
   )
 }
 

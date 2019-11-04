@@ -4,9 +4,12 @@ output: html_notebook
 ---
 
 ```{r}
-library(tidyverse)
 library(GEOquery)
 library(Biobase)
+library(DESeq2)
+library(RColorBrewer)
+library(pheatmap)
+library(tidyverse)
 ```
 
 ## Download soft files from GEO
@@ -38,7 +41,7 @@ Select RNA-seq samples, 12 weeks
 samples_rna_12 <- samples_info %>%
   separate(source_name_ch1, c("genotype", "tissue", "age"), ", ") %>%
   mutate(genotype = ifelse(genotype == "R6/2", "HD", "WT")) %>%
-  filter(library_strategy == "RNA-Seq", age == "12 weeks") %>%
+  filter(library_strategy == "RNA-Seq", age == "12 weeks", tissue == "cortex") %>%
   select(-c(library_strategy, age))
 samples_rna_12
 ```
@@ -50,11 +53,12 @@ SAMPLES_FOLDER = "./data/GSE48963_RAW/"
 
 read_counts <- function(sample_info) {
   file_path <- paste(SAMPLES_FOLDER, sample_info$geo_accession, "_", sample_info$title, ".combined.rpkm", sep = "")
-  
+  print(sample_info$title)
+
   return (
     read.table(file_path, sep = "\t", row.names = 1) %>%
       select(V2) %>%
-      rename(!!sample_info$title := V2)
+      dplyr::rename(!!sample_info$title := V2)
   )
 }
 
@@ -70,6 +74,132 @@ for(i in 2:nrow(samples_rna_12)) {
 ```
 
 ```{r}
+head(total_counts)
+```
+
+## DESeq2
+
+Create columns metadata for DESeq2:
+
+```{r}
+col_data <- samples_rna_12 %>%
+  magrittr::set_rownames(.$title) %>%
+  select(genotype)
+```
+
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData =  total_counts,
+                                    colData =  col_data,
+                                    design = ~ genotype)
+```
+
+```{r}
+# Determine the size factors to use for normalization
+dds <- estimateSizeFactors(dds)
+
+# Extract the normalized counts
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Hierarchical heatmap by condition
+
+# When performing quality assessment of our count data, we need to transform the normalized counts for better visualization of the variance for unsupervised clustering analyses.
+# To assess the similarity of the smoc2 samples using hierarchical heatmaps, transform the normalized counts and perform hierarchical clustering analysis.
+
+# Transform the normalized counts 
+vsd <- vst(dds, blind = TRUE)
+
+# Extract the matrix of transformed counts
+vsd_mat <- assay(vsd)
+
+# Compute the correlation values between samples
+vsd_cor <- cor(vsd_mat) 
+
+# Plot the heatmap
+pheatmap(vsd_cor, annotation = col_data %>% select(genotype))
 
 ```
+
+```{r}
+# Plot the PCA of PC1 and PC2
+plotPCA(vsd, intgroup = "genotype")
+```
+
+```{r}
+result <- DESeq(dds)
+
+plotDispEsts(result)
+```
+
+```{r}
+de_res <- results(result, 
+               contrast = c("genotype", "HD", "WT"), 
+               alpha = 0.05)
+de_res <- lfcShrink(result, 
+                    contrast = c("genotype", "HD", "WT"),
+                    res = de_res)
+de_res <- results(result, 
+                  contrast = c("genotype", "HD", "WT"), 
+                  alpha = 0.05, 
+                  lfcThreshold = 0.32)
+de_res <-  lfcShrink(result, 
+                     contrast = c("genotype", "HD", "WT"),
+                     res = de_res)
+de_res_all <- data.frame(de_res) 
+
+# Subset the results to only return the significant genes with p-adjusted values less than 0.05
+de_res_sig <- de_res_all %>%
+  filter(padj < 0.05)
+```
+```{r}
+DESeq2::plotMA(de_res)
+```
+
+```{r}
+# Create the volcano plot
+de_res_all %>%
+  mutate(threshold = padj < 0.05) %>%
+  ggplot() + 
+    geom_point(aes(x = log2FoldChange, y = -log10(padj), color = threshold)) + 
+    xlab("log2 fold change") + 
+    ylab("-log10 adjusted p-value") + 
+    theme(legend.position = "none", 
+          plot.title = element_text(size = rel(1.5), hjust = 0.5), 
+          axis.title = element_text(size = rel(1.25)))
+```
+
+```{r}
+# Subset normalized counts to significant genes
+sig_norm_counts <- normalized_counts[rownames(de_res_sig), ]
+
+# Choose heatmap color palette
+heat_colors <- brewer.pal(n = 6, name = "YlOrRd")
+
+# Plot heatmap
+pheatmap(sig_norm_counts, 
+            color = heat_colors, 
+            cluster_rows = TRUE, 
+            show_rownames = FALSE,
+            annotation = select(col_data, condition), 
+            scale = "row")
+
+```
+
+```{r}
+head(de_res_sig)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

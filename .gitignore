@@ -36,5 +36,7 @@ vignettes/*.pdf
 rsconnect/
 
 data/
+out/
+rna_seq_GSE48963_files/
 
 *.nb.html

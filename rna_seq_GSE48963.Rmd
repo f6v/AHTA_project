@@ -1,6 +1,8 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  pdf_document: default
+  html_notebook: default
 ---
 
 ```{r}
@@ -10,6 +12,9 @@ library(DESeq2)
 library(RColorBrewer)
 library(pheatmap)
 library(tidyverse)
+library(apeglm)
+library(AnnotationDbi)
+library(org.Mm.eg.db)
 ```
 
 ## Download soft files from GEO
@@ -41,7 +46,7 @@ Select RNA-seq samples, 12 weeks
 samples_rna_12 <- samples_info %>%
   separate(source_name_ch1, c("genotype", "tissue", "age"), ", ") %>%
   mutate(genotype = ifelse(genotype == "R6/2", "HD", "WT")) %>%
-  filter(library_strategy == "RNA-Seq", age == "12 weeks", tissue == "cortex") %>%
+  filter(library_strategy == "RNA-Seq", age == "12 weeks") %>%
   select(-c(library_strategy, age))
 samples_rna_12
 ```
@@ -53,7 +58,6 @@ SAMPLES_FOLDER = "./data/GSE48963_RAW/"
 
 read_counts <- function(sample_info) {
   file_path <- paste(SAMPLES_FOLDER, sample_info$geo_accession, "_", sample_info$title, ".combined.rpkm", sep = "")
-  print(sample_info$title)
 
   return (
     read.table(file_path, sep = "\t", row.names = 1) %>%
@@ -77,118 +81,111 @@ for(i in 2:nrow(samples_rna_12)) {
 head(total_counts)
 ```
 
+Check for duplicates:
+
+```{r}
+sum(duplicated(rownames(total_counts)))
+```
+
+
+## A note on counts
+
+We do not perform any filtering based on minium read count, since it only affects the computation speed and object size. Such transformations are not providing any benefits for a dataset of 12 samples.
+
 ## DESeq2
 
 Create columns metadata for DESeq2:
 
 ```{r}
 col_data <- samples_rna_12 %>%
-  magrittr::set_rownames(.$title) %>%
-  select(genotype)
+  mutate(group = paste(genotype, tissue, sep = "_")) %>%
+  magrittr::set_rownames(.$title)
+head(col_data)
 ```
 
 
 ```{r}
-dds <- DESeqDataSetFromMatrix(countData =  total_counts,
-                                    colData =  col_data,
-                                    design = ~ genotype)
+dds <- DESeqDataSetFromMatrix(countData = total_counts,
+                                    colData = col_data,
+                                    design = ~ group)
 ```
 
+## PCA
+
 ```{r}
-# Determine the size factors to use for normalization
 dds <- estimateSizeFactors(dds)
-
-# Extract the normalized counts
 normalized_counts <- counts(dds, normalized = TRUE)
-
-# Hierarchical heatmap by condition
-
-# When performing quality assessment of our count data, we need to transform the normalized counts for better visualization of the variance for unsupervised clustering analyses.
-# To assess the similarity of the smoc2 samples using hierarchical heatmaps, transform the normalized counts and perform hierarchical clustering analysis.
-
-# Transform the normalized counts 
 vsd <- vst(dds, blind = TRUE)
+plotPCA(vsd, intgroup = "group")
+```
 
-# Extract the matrix of transformed counts
-vsd_mat <- assay(vsd)
+All the groups can be separated based on PC1 and PC2.
 
-# Compute the correlation values between samples
-vsd_cor <- cor(vsd_mat) 
+## Differential Expression
 
-# Plot the heatmap
-pheatmap(vsd_cor, annotation = col_data %>% select(genotype))
+Peform analysis:
 
+```{r}
+de_result <- DESeq(dds)
+```
+
+Define contrasts for comparisons within tissue:
+
+```{r}
+contrasts_striatum <- c("group", "HD_striatum", "WT_striatum")
+contrasts_cortex <- c("group", "HD_cortex", "WT_cortex")
 ```
 
 ```{r}
-# Plot the PCA of PC1 and PC2
-plotPCA(vsd, intgroup = "genotype")
+res_striatum <- results(de_result, lfcThreshold = 0.5, contrast = contrasts_striatum) %>%
+  as.data.frame() %>%
+  drop_na()
+```
+
+## MA Plot
+
+```{r}
+res_striatum %>%
+  mutate(significant = padj < 0.1) %>%
+  dplyr::select(baseMean, log2FoldChange, significant) %>%
+  plotMA()
+
+abline(h=c(-0.5, 0.5), col="dodgerblue", lwd=2)
+```
+
+## MA Plot(shrinkage)
+
+```{r}
+res_cortex_shrink <- lfcShrink(de_result, coef="group_WT_cortex_vs_HD_cortex", type="apeglm")
+  #arrange(baseMean) %>%
+  #select(baseMean, log2FoldChange, padj < 0.1) %>%
+summary(res_cortex_shrink)
+plotMA(res_cortex_shrink)
+```
+
+## Select significant results
+
+Add gene symbol:
+
+```{r}
+entrez_id <- rownames(res_striatum)
+res_striatum$gene_symbol <- mapIds(org.Mm.eg.db,
+                     keys = entrez_id,
+                     column = "SYMBOL",
+                     keytype = "ENTREZID",
+                     multiVals = "first")
 ```
 
 ```{r}
-result <- DESeq(dds)
-
-plotDispEsts(result)
+res_striatum_sig <- res_striatum %>%
+  filter(padj < 0.1) %>%
+  arrange(padj) 
 ```
 
 ```{r}
-de_res <- results(result, 
-               contrast = c("genotype", "HD", "WT"), 
-               alpha = 0.05)
-de_res <- lfcShrink(result, 
-                    contrast = c("genotype", "HD", "WT"),
-                    res = de_res)
-de_res <- results(result, 
-                  contrast = c("genotype", "HD", "WT"), 
-                  alpha = 0.05, 
-                  lfcThreshold = 0.32)
-de_res <-  lfcShrink(result, 
-                     contrast = c("genotype", "HD", "WT"),
-                     res = de_res)
-de_res_all <- data.frame(de_res) 
-
-# Subset the results to only return the significant genes with p-adjusted values less than 0.05
-de_res_sig <- de_res_all %>%
-  filter(padj < 0.05)
+res_striatum_sig %>%
+  write_delim('./out/GSE48963.tsv')
 ```
-```{r}
-DESeq2::plotMA(de_res)
-```
-
-```{r}
-# Create the volcano plot
-de_res_all %>%
-  mutate(threshold = padj < 0.05) %>%
-  ggplot() + 
-    geom_point(aes(x = log2FoldChange, y = -log10(padj), color = threshold)) + 
-    xlab("log2 fold change") + 
-    ylab("-log10 adjusted p-value") + 
-    theme(legend.position = "none", 
-          plot.title = element_text(size = rel(1.5), hjust = 0.5), 
-          axis.title = element_text(size = rel(1.25)))
-```
-
-```{r}
-# Subset normalized counts to significant genes
-sig_norm_counts <- normalized_counts[rownames(de_res_sig), ]
-
-# Choose heatmap color palette
-heat_colors <- brewer.pal(n = 6, name = "YlOrRd")
-
-# Plot heatmap
-pheatmap(sig_norm_counts, 
-            color = heat_colors, 
-            cluster_rows = TRUE, 
-            show_rownames = FALSE,
-            annotation = select(col_data, condition), 
-            scale = "row")
-
-```
-
-```{r}
-head(de_res_sig)
-```
-
 
 
 

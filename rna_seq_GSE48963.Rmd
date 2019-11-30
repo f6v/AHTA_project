@@ -12,7 +12,7 @@ library(DESeq2)
 library(RColorBrewer)
 library(pheatmap)
 library(tidyverse)
-library(apeglm)
+#library(apeglm)
 library(AnnotationDbi)
 library(org.Mm.eg.db)
 ```
@@ -20,7 +20,7 @@ library(org.Mm.eg.db)
 ## Download soft files from GEO
 
 ```{r}
-gse <- getGEO(filename = "./data/GSE48963_RAW/GSE48963_family.soft")
+gse <- getGEO(filename = "./data/GSE48962/GSE48963_family.soft")
 ```
 
 ```{r}
@@ -47,21 +47,21 @@ samples_rna_12 <- samples_info %>%
   separate(source_name_ch1, c("genotype", "tissue", "age"), ", ") %>%
   mutate(genotype = ifelse(genotype == "R6/2", "HD", "WT")) %>%
   filter(library_strategy == "RNA-Seq", age == "12 weeks") %>%
-  select(-c(library_strategy, age))
+  dplyr::select(-c(library_strategy, age))
 samples_rna_12
 ```
 
 ## Prepare data
 
 ```{r}
-SAMPLES_FOLDER = "./data/GSE48963_RAW/"
+SAMPLES_FOLDER = "./data/GSE48962/"
 
 read_counts <- function(sample_info) {
   file_path <- paste(SAMPLES_FOLDER, sample_info$geo_accession, "_", sample_info$title, ".combined.rpkm", sep = "")
 
   return (
     read.table(file_path, sep = "\t", row.names = 1) %>%
-      select(V2) %>%
+      dplyr::select(V2) %>%
       dplyr::rename(!!sample_info$title := V2)
   )
 }
@@ -73,7 +73,7 @@ for(i in 2:nrow(samples_rna_12)) {
   
   total_counts <- merge(total_counts, sample_counts, by = 0, all = TRUE)
   rownames(total_counts) = total_counts[, "Row.names"]
-  total_counts <- total_counts %>% select(-Row.names)
+  total_counts <- total_counts %>% dplyr::select(-Row.names)
 }
 ```
 
@@ -156,11 +156,11 @@ abline(h=c(-0.5, 0.5), col="dodgerblue", lwd=2)
 ## MA Plot(shrinkage)
 
 ```{r}
-res_cortex_shrink <- lfcShrink(de_result, coef="group_WT_cortex_vs_HD_cortex", type="apeglm")
-  #arrange(baseMean) %>%
-  #select(baseMean, log2FoldChange, padj < 0.1) %>%
-summary(res_cortex_shrink)
-plotMA(res_cortex_shrink)
+# res_cortex_shrink <- lfcShrink(de_result, coef="group_WT_cortex_vs_HD_cortex", type="apeglm")
+#   #arrange(baseMean) %>%
+#   #select(baseMean, log2FoldChange, padj < 0.1) %>%
+# summary(res_cortex_shrink)
+# plotMA(res_cortex_shrink)
 ```
 
 ## Select significant results
@@ -184,9 +184,16 @@ res_striatum_sig <- res_striatum %>%
 
 ```{r}
 res_striatum_sig %>%
-  write_delim('./out/GSE48963.tsv')
+  write_delim('./out/GSE48963_str_12_sig.tsv')
 ```
 
+## Export for BETA analysis
+
+```{r}
+res_striatum %>%
+  dplyr::select(gene_symbol, log2FoldChange, padj) %>%
+  write_delim('./out/GSE48963_str_12_all.tsv', col_names = F)
+```
 
 
 

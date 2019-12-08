@@ -1,0 +1,194 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(ArrayExpress)
+library(arrayQualityMetrics)
+library(affy)
+library(siggenes)
+library(limma)
+library(tidyverse)
+library(AnnotationDbi)
+library(mogene10sttranscriptcluster.db)
+```
+
+```{r}
+raw_data_dir = 'data/GSE44306/'
+if (!dir.exists(raw_data_dir)) {
+  dir.create(raw_data_dir)
+}
+```
+
+```{r}
+getAE("GSE44306", path = raw_data_dir, type = "raw")
+```
+
+
+```{r}
+sdrf_location <- file.path(raw_data_dir, "E-GEOD-44306.sdrf.txt")
+sdrf <- read.delim(sdrf_location)
+
+sdrf <- sdrf %>%
+  dplyr::rename(
+    age = Characteristics..age.,
+    genotype = Characteristics..genotype.,
+    tissue = Characteristics..organism.part.,
+    sample_name = Source.Name
+  ) %>%
+  mutate(sample_name = str_extract(sample_name, "[^\\s]+"))
+
+levels(sdrf$genotype) <- c("HD", "WT")
+levels(sdrf$age) <- c("10", "20")
+
+sdrf <- sdrf %>%
+  filter(tissue == "hippocampus")
+
+sdrf <- AnnotatedDataFrame(sdrf)
+rownames(sdrf) <- str_extract(sdrf$Array.Data.File, "[^_]+")
+
+raw_data <- oligo::read.celfiles(filenames = file.path(raw_data_dir, sdrf$Array.Data.File),
+                                 verbose = FALSE,
+                                 phenoData = sdrf)
+stopifnot(validObject(raw_data))
+```
+
+```{r}
+head(pData(raw_data))
+```
+
+```{r}
+oligo::boxplot(raw_data, target = "core", main = "Boxplot of log2-intensitites for the raw data")
+```
+
+```{r}
+arrayQualityMetrics(expressionset = raw_data,
+    outdir = paste(raw_data_dir, 'arrayQualityMetrics_raw_hip', sep = ""),
+    force = TRUE, do.logtransform = TRUE,
+    intgroup = c("genotype", "age"))
+```
+
+```{r}
+data_norm <- oligo::rma(raw_data, target = "core")
+```
+```{r}
+arrayQualityMetrics(expressionset = data_norm,
+    outdir = paste(raw_data_dir, 'arrayQualityMetrics_norm_hip', sep = ""),
+    force = TRUE, do.logtransform = TRUE,
+    intgroup = c("genotype", "age"))
+```
+```{r}
+oligo::boxplot(data_norm, target = "core", main = "Boxplot of log2-intensitites for the normalized data")
+```
+
+```{r}
+exp_norm <- log2(exprs(data_norm))
+pca_norm <- prcomp(t(exp_norm), scale. = FALSE)
+
+percentVar <- round(100 * pca_norm$sdev ^ 2 / sum(pca_norm$sdev ^ 2), 1)
+sd_ratio <- sqrt(percentVar[2] / percentVar[1])
+
+data_for_plot <- data.frame(PC1 = pca_norm$x[, 1], PC2 = pca_norm$x[, 2],
+                    Genotype = pData(data_norm)$genotype,
+                    Age = pData(data_norm)$age)
+
+ggplot(data_for_plot, aes(PC1, PC2)) +
+  geom_point(aes(shape = Age, colour = Genotype)) +
+  ggtitle("PCA plot of the log-transformed raw expression data") +
+  xlab(paste0("PC1, VarExp: ", percentVar[1], "%")) +
+  ylab(paste0("PC2, VarExp: ", percentVar[2], "%")) +
+  theme(plot.title = element_text(hjust = 0.5))+
+  coord_fixed(ratio = sd_ratio) +
+  scale_color_manual(values = c("darkorange2", "dodgerblue4"))
+```
+
+```{r}
+gene_annotation <- AnnotationDbi::select(mogene10sttranscriptcluster.db,
+                                  keys = (featureNames(data_norm)),
+                                  columns = c("SYMBOL", "GENENAME"),
+                                  keytype = "PROBEID") %>%
+  filter(!is.na(SYMBOL))
+
+# uniquely_mapped_probes <- gene_annotation %>%
+#   filter(!is.na(SYMBOL)) %>%
+#   group_by(PROBEID) %>%
+#   dplyr::summarize(no_of_matches = n_distinct(SYMBOL)) #%>%
+  # filter(no_of_matches == 1) %>%
+  # dplyr::select(PROBEID) %>%
+  # pull()
+
+# gene_annotation <- gene_annotation %>%
+#   filter(PROBEID %in% uniquely_mapped_probes)
+# 
+# probes_to_exclude <- (featureNames(data_norm) %in% uniquely_mapped_probes)
+# data_norm <-  BiocGenerics::subset(data_norm, !probes_to_exclude)
+# 
+# fData(data_norm)$PROBEID <- rownames(fData(data_norm))
+# fData(data_norm) <- left_join(fData(data_norm), gene_annotation)
+# # restore rownames after left_join
+# rownames(fData(data_norm)) <- fData(data_norm)$PROBEID
+```
+
+
+## Design matrix and contrasts
+
+```{r}
+group <- with(pData(data_norm), paste(genotype, age, sep = ".")) %>%
+  as_factor()
+
+design <- model.matrix(~0 + group)
+colnames(design) <- levels(group)
+colSums(design)
+```
+```{r}
+contrasts <- makeContrasts(diff_10 = HD.10 - WT.10,
+                           diff_20 = HD.20 - WT.20,
+                           levels = design)
+
+contrasts
+```
+
+## Fit the model
+
+```{r}
+fit <- lmFit(data_norm, design) %>%
+  contrasts.fit(contrasts = contrasts) %>%
+  eBayes()
+
+results <- decideTests(fit)
+summary(results)
+vennDiagram(results)
+```
+
+```{r}
+volcanoplot(fit, coef = "diff_10")
+volcanoplot(fit, coef = "diff_20")
+```
+
+```{r}
+res_10_sig <- topTable(fit, "diff_10", p.value = 0.05, number = nrow(fit)) #%>%
+res_10_sig$gene_symbol <- mapIds(mogene10sttranscriptcluster.db,
+                     keys = rownames(res_10_sig),
+                     column = "SYMBOL",
+                     keytype = "PROBEID",
+                     multiVals = "first")
+
+res_20_sig <- topTable(fit, "diff_20", p.value = 0.05, number = nrow(fit)) #%>%
+res_20_sig$gene_symbol <- mapIds(mogene10sttranscriptcluster.db,
+                     keys = rownames(res_20_sig),
+                     column = "SYMBOL",
+                     keytype = "PROBEID",
+                     multiVals = "first")
+```
+
+
+
+
+
+
+
+
+
+

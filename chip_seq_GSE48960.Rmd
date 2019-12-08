@@ -9,6 +9,12 @@ library(tidyverse)
 
 
 ```{r}
-wt_peaks <- read.table("./data/GSE48960/results/macs2_pooled/WT_12wks_ctx_pooled_peaks.narrowPeak")
-hd_peaks <- read.table("./data/GSE48960/results/macs2_pooled/R6-2_12wks_ctx_pooled_peaks.narrowPeak")
+wt_ctx_12_peaks <- read.table("./data/GSE48960/ctx_12/results/macs2/R6-2_12wks_ctx_pooled_summits.bed")
 ```
+
+```{r}
+wt_ctx_12_peaks %>%
+  select(-V5) %>%
+  write_delim('./data/GSE48960/ctx_12/results/macs2/R6-2_12wks_ctx_pooled_summits_4col.bed', delim = "\t", col_names = F)
+```
+

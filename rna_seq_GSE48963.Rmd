@@ -15,6 +15,7 @@ library(tidyverse)
 #library(apeglm)
 library(AnnotationDbi)
 library(org.Mm.eg.db)
+library(limma)
 ```
 
 ## Download soft files from GEO
@@ -46,7 +47,7 @@ Select RNA-seq samples, 12 weeks
 samples_rna_12 <- samples_info %>%
   separate(source_name_ch1, c("genotype", "tissue", "age"), ", ") %>%
   mutate(genotype = ifelse(genotype == "R6/2", "HD", "WT")) %>%
-  filter(library_strategy == "RNA-Seq", age == "12 weeks") %>%
+  filter(library_strategy == "RNA-Seq", age == "12 weeks", tissue == "cortex") %>%
   dplyr::select(-c(library_strategy, age))
 samples_rna_12
 ```
@@ -116,10 +117,25 @@ dds <- DESeqDataSetFromMatrix(countData = total_counts,
 dds <- estimateSizeFactors(dds)
 normalized_counts <- counts(dds, normalized = TRUE)
 vsd <- vst(dds, blind = TRUE)
-plotPCA(vsd, intgroup = "group")
-```
 
+plotPCA(vsd, intgroup = "group") +
+  geom_label(aes(label = name))
+# percentVar <- round(100 * attr(pcaData, "percentVar"))
+# ggplot(pcaData, aes(PC1, PC2, color=group)) +
+#   geom_point(size=3) +
+#   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+#   ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+#   geom_label(aes(label = name)) +
+#   coord_fixed()
+```
 All the groups can be separated based on PC1 and PC2.
+
+
+## Dispersion plot
+
+```{r}
+DESeq2::plotDispEsts(de_result)
+```
 
 ## Differential Expression
 
@@ -133,7 +149,7 @@ Define contrasts for comparisons within tissue:
 
 ```{r}
 contrasts_striatum <- c("group", "HD_striatum", "WT_striatum")
-contrasts_cortex <- c("group", "HD_cortex", "WT_cortex")
+contrasts_cortex <- c("group", "WT_cortex", "HD_cortex")
 ```
 
 ```{r}
@@ -192,12 +208,54 @@ res_striatum_sig %>%
 ```{r}
 res_striatum %>%
   dplyr::select(gene_symbol, log2FoldChange, padj) %>%
-  write_delim('./out/GSE48963_str_12_all.tsv', col_names = F)
+  write_delim('./out/GSE48963_str_12_all.tsv', delim = "\t", col_names = F)
 ```
 
 
+## Cortext
 
+```{r}
+res_cortex <- results(de_result, lfcThreshold = 0.5, altHypothesis = "greaterAbs", contrast = contrasts_cortex) %>%
+  as.data.frame() %>%
+  drop_na()
+```
 
+```{r}
+res_cortex %>%
+  mutate(significant = padj < 0.1) %>%
+  dplyr::select(baseMean, log2FoldChange, significant) %>%
+  plotMA()
+
+abline(h=c(-0.5, 0.5), col="dodgerblue", lwd=2)
+```
+
+```{r}
+entrez_id <- rownames(res_cortex)
+res_cortex$gene_symbol <- mapIds(org.Mm.eg.db,
+                     keys = entrez_id,
+                     column = "SYMBOL",
+                     keytype = "ENTREZID",
+                     multiVals = "first")
+```
+
+```{r}
+res_cortex_sig <- res_cortex %>%
+  filter(padj < 0.1) %>%
+  arrange(padj) 
+```
+
+```{r}
+res_cortex %>%
+  dplyr::select(gene_symbol, log2FoldChange, padj) %>%
+  write_delim('./out/GSE48963_ctx_12_all.tsv', delim = "\t", col_names = F)
+```
+
+```{r}
+res_cortex_sig %>%
+  filter(padj < 0.1) %>%
+  dplyr::select(gene_symbol) %>%
+  write_delim('./out/GSE48963_ctx_12_sig_symbols.tsv', delim = "\t", col_names = F)
+```
 
 
 

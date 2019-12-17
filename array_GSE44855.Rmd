@@ -168,21 +168,35 @@ volcanoplot(fit, coef = "diff_20")
 ```
 
 ```{r}
-res_10_sig <- topTable(fit, "diff_10", p.value = 0.05, number = nrow(fit)) #%>%
-res_10_sig$gene_symbol <- mapIds(mogene10sttranscriptcluster.db,
-                     keys = rownames(res_10_sig),
-                     column = "SYMBOL",
-                     keytype = "PROBEID",
-                     multiVals = "first")
-
-res_20_sig <- topTable(fit, "diff_20", p.value = 0.05, number = nrow(fit)) #%>%
-res_20_sig$gene_symbol <- mapIds(mogene10sttranscriptcluster.db,
-                     keys = rownames(res_20_sig),
-                     column = "SYMBOL",
-                     keytype = "PROBEID",
-                     multiVals = "first")
+top_results_annotated <- function(fit, coef) {
+  res <- topTable(fit, coef, p.value = 0.05, number = nrow(fit))
+  
+  anno_cols <- c("ENTREZID", "SYMBOL")
+  
+  anno <- mogene10sttranscriptcluster.db %>%
+            select(keys = rownames(res), columns = anno_cols, keytype = "PROBEID", multiVals = "first") %>%
+            group_by(PROBEID) %>%
+            distinct(PROBEID, .keep_all = T)
+  
+  return(
+    bind_cols(res, anno) %>%
+                dplyr::rename(entrez_id = ENTREZID, gene_symbol = SYMBOL) %>%
+                dplyr::select(-PROBEID) %>%
+                filter(!is.na(entrez_id))
+  )
+}
+  
+res_10_sig <- top_results_annotated(fit, "diff_10")
+res_20_sig <- top_results_annotated(fit, "diff_20")
 ```
 
+```{r}
+topKEGG(kegga(res_10_sig$entrez_id, species = "Mm"), number = Inf)
+```
+
+```{r}
+topKEGG(kegga(res_20_sig$entrez_id, species = "Mm"), number = Inf)
+```
 
 
 

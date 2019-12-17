@@ -47,7 +47,7 @@ Select RNA-seq samples, 12 weeks
 samples_rna_12 <- samples_info %>%
   separate(source_name_ch1, c("genotype", "tissue", "age"), ", ") %>%
   mutate(genotype = ifelse(genotype == "R6/2", "HD", "WT")) %>%
-  filter(library_strategy == "RNA-Seq", age == "12 weeks", tissue == "cortex") %>%
+  filter(library_strategy == "RNA-Seq", age == "12 weeks") %>%
   dplyr::select(-c(library_strategy, age))
 samples_rna_12
 ```
@@ -118,17 +118,9 @@ dds <- estimateSizeFactors(dds)
 normalized_counts <- counts(dds, normalized = TRUE)
 vsd <- vst(dds, blind = TRUE)
 
-plotPCA(vsd, intgroup = "group") +
-  geom_label(aes(label = name))
-# percentVar <- round(100 * attr(pcaData, "percentVar"))
-# ggplot(pcaData, aes(PC1, PC2, color=group)) +
-#   geom_point(size=3) +
-#   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
-#   ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
-#   geom_label(aes(label = name)) +
-#   coord_fixed()
+plotPCA(vsd, intgroup = "group") + theme_minimal() +
+    scale_color_manual(labels = c("HD, cortex", "HD, striatum", "WT, cortex", "WT, striatum"), values = c("#CC79A7", "#E69F00", "#56B4E9", "#009E73")) + coord_fixed(ratio = sqrt(20/65))
 ```
-All the groups can be separated based on PC1 and PC2.
 
 
 ## Dispersion plot

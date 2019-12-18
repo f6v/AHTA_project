@@ -1,6 +1,8 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  pdf_document: default
+  html_notebook: default
 ---
 
 
@@ -132,7 +134,7 @@ gene_annotation <- AnnotationDbi::select(mogene10sttranscriptcluster.db,
 ```
 
 
-## Design matrix and contrasts
+### Design matrix and contrasts
 
 ```{r}
 group <- with(pData(data_norm), paste(genotype, age, sep = ".")) %>%
@@ -150,7 +152,7 @@ contrasts <- makeContrasts(diff_10 = HD.10 - WT.10,
 contrasts
 ```
 
-## Fit the model
+### Fit the model
 
 ```{r}
 fit <- lmFit(data_norm, design) %>%
@@ -166,6 +168,8 @@ vennDiagram(results)
 volcanoplot(fit, coef = "diff_10")
 volcanoplot(fit, coef = "diff_20")
 ```
+
+### Extract results and add annotation
 
 ```{r}
 top_results_annotated <- function(fit, coef) {
@@ -190,6 +194,8 @@ res_10_sig <- top_results_annotated(fit, "diff_10")
 res_20_sig <- top_results_annotated(fit, "diff_20")
 ```
 
+### KEGG Pathways
+
 ```{r}
 topKEGG(kegga(res_10_sig$entrez_id, species = "Mm"), number = Inf)
 ```
@@ -198,6 +204,17 @@ topKEGG(kegga(res_10_sig$entrez_id, species = "Mm"), number = Inf)
 topKEGG(kegga(res_20_sig$entrez_id, species = "Mm"), number = Inf)
 ```
 
+### Save results
+
+```{r}
+res_10_sig %>%
+  dplyr::select(logFC, adj.P.Val, gene_symbol) %>%
+  write_delim('./out/GSE44855_hip_10_sig.tsv', delim = "\t", col_names = T)
+
+res_20_sig %>%
+  dplyr::select(logFC, adj.P.Val, gene_symbol) %>%
+  write_delim('./out/GSE44855_hip_20_sig.tsv', delim = "\t", col_names = T)
+```
 
 
 

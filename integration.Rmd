@@ -7,6 +7,7 @@ output: html_notebook
 library(tidyverse)
 library(ChIPpeakAnno)
 library(TxDb.Mmusculus.UCSC.mm9.knownGene)
+library(UpSetR)
 ```
 
 
@@ -65,5 +66,27 @@ anno <- annotatePeakInBatch(peaks, AnnotationData=annoData,
                   bindingRegion=c(-2000, 3000))
 anno$symbol <- xget(anno$feature, org.Mm.egSYMBOL)
 head(anno)
+```
+
+### Transcriptional dysregulation
+
+```{r}
+array_10 <- readr::read_tsv('./out/GSE44855_hip_10_sig.tsv')
+array_20 <- readr::read_tsv('./out/GSE44855_hip_20_sig.tsv')
+rna_seq_ctx <- readr::read_tsv('./out/GSE48963_ctx_12_sig.tsv')
+rna_seq_str <- readr::read_tsv('./out/GSE48963_str_12_sig.tsv')
+```
+
+```{r}
+all_de_genes = list(
+  "Hippocampus, 10 weeks" = array_10$gene_symbol,
+  "Hippocampus, 20 weeks" = array_20$gene_symbol,
+  "Cortex, 12 weeks" = rna_seq_ctx$gene_symbol,
+  "Striatum, 12 weeks" = rna_seq_str$gene_symbol
+)
+```
+
+```{r}
+upset(fromList(all_de_genes), order.by = "freq")
 ```
 

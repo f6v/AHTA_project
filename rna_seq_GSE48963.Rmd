@@ -12,7 +12,6 @@ library(DESeq2)
 library(RColorBrewer)
 library(pheatmap)
 library(tidyverse)
-#library(apeglm)
 library(AnnotationDbi)
 library(org.Mm.eg.db)
 library(limma)
@@ -82,16 +81,9 @@ for(i in 2:nrow(samples_rna_12)) {
 head(total_counts)
 ```
 
-Check for duplicates:
-
-```{r}
-sum(duplicated(rownames(total_counts)))
-```
-
-
 ## A note on counts
 
-We do not perform any filtering based on minium read count, since it only affects the computation speed and object size. Such transformations are not providing any benefits for a dataset of 12 samples.
+We do not perform any filtering based on minium read count, since it only affects the computation speed and object size. Such transformations do not providing any benefits for a small dataset.
 
 ## DESeq2
 
@@ -101,152 +93,115 @@ Create columns metadata for DESeq2:
 col_data <- samples_rna_12 %>%
   mutate(group = paste(genotype, tissue, sep = "_")) %>%
   magrittr::set_rownames(.$title)
-head(col_data)
+col_data
 ```
 
+### PCA for all groups
 
 ```{r}
-dds <- DESeqDataSetFromMatrix(countData = total_counts,
+dds_all <- DESeqDataSetFromMatrix(countData = total_counts,
                                     colData = col_data,
                                     design = ~ group)
-```
+dds_all <- estimateSizeFactors(dds_all)
+normalized_counts <- counts(dds_all, normalized = TRUE)
+vsd_all <- vst(dds_all, blind = TRUE)
 
-## PCA
+group_labels <- c("HD, cortex", "HD, striatum", "WT, cortex", "WT, striatum")
+group_colors <- c("#CC79A7", "#E69F00", "#56B4E9", "#009E73")
+plotPCA(vsd_all, intgroup = "group") +
+  scale_color_manual(labels = group_labels, values = group_colors) +
+  theme_minimal() +
+  coord_fixed(ratio = sqrt(20 / 65))
+```
+### Helper functions
 
 ```{r}
-dds <- estimateSizeFactors(dds)
-normalized_counts <- counts(dds, normalized = TRUE)
-vsd <- vst(dds, blind = TRUE)
+plotMA_with_line <- function(res) {
+  res %>%
+    mutate(significant = padj < 0.1) %>%
+    dplyr::select(baseMean, log2FoldChange, significant) %>%
+    plotMA()
+    abline(h=c(-0.5, 0.5), col="dodgerblue", lwd = 2)
+}
 
-plotPCA(vsd, intgroup = "group") + theme_minimal() +
-    scale_color_manual(labels = c("HD, cortex", "HD, striatum", "WT, cortex", "WT, striatum"), values = c("#CC79A7", "#E69F00", "#56B4E9", "#009E73")) + coord_fixed(ratio = sqrt(20/65))
+get_results <- function(res, contrasts) {
+  return (
+    results(res, lfcThreshold = 0.5, contrast = contrasts) %>%
+      as.data.frame() %>%
+      drop_na()
+  )
+}
+
+get_gene_symbols <-function(res) {
+  return (
+    mapIds(org.Mm.eg.db,
+           keys = rownames(res),
+           column = "SYMBOL",
+           keytype = "ENTREZID",
+           multiVals = "first")
+  )
+}
+
+select_sig <- function(res) {
+  return (
+    res %>%
+      filter(padj < 0.1) %>%
+      arrange(padj)
+  )
+}
+
+save_result <- function(res, out_file) {
+  res %>%
+    dplyr::select(gene_symbol, log2FoldChange, padj) %>%
+    write_delim(out_file, delim = "\t", col_names = T)
+}
 ```
 
-
-## Dispersion plot
-
-```{r}
-DESeq2::plotDispEsts(de_result)
-```
-
-## Differential Expression
-
-Peform analysis:
+###  Differential Expression in Cortex
 
 ```{r}
-de_result <- DESeq(dds)
-```
+col_data_ctx <- col_data %>%
+  filter(tissue == "cortex")
+counts_ctx <- total_counts[, col_data_ctx %>% dplyr::select(title) %>% unlist()]
 
-Define contrasts for comparisons within tissue:
-
-```{r}
-contrasts_striatum <- c("group", "HD_striatum", "WT_striatum")
-contrasts_cortex <- c("group", "WT_cortex", "HD_cortex")
-```
-
-```{r}
-res_striatum <- results(de_result, lfcThreshold = 0.5, contrast = contrasts_striatum) %>%
-  as.data.frame() %>%
-  drop_na()
-```
-
-## MA Plot
-
-```{r}
-res_striatum %>%
-  mutate(significant = padj < 0.1) %>%
-  dplyr::select(baseMean, log2FoldChange, significant) %>%
-  plotMA()
-
-abline(h=c(-0.5, 0.5), col="dodgerblue", lwd=2)
-```
-
-## MA Plot(shrinkage)
-
-```{r}
-# res_cortex_shrink <- lfcShrink(de_result, coef="group_WT_cortex_vs_HD_cortex", type="apeglm")
-#   #arrange(baseMean) %>%
-#   #select(baseMean, log2FoldChange, padj < 0.1) %>%
-# summary(res_cortex_shrink)
-# plotMA(res_cortex_shrink)
-```
-
-## Select significant results
-
-Add gene symbol:
-
-```{r}
-entrez_id <- rownames(res_striatum)
-res_striatum$gene_symbol <- mapIds(org.Mm.eg.db,
-                     keys = entrez_id,
-                     column = "SYMBOL",
-                     keytype = "ENTREZID",
-                     multiVals = "first")
+dds_ctx <- DESeqDataSetFromMatrix(countData = counts_ctx,
+                                    colData = col_data_ctx,
+                                    design = ~ group)
+de_result_ctx <- DESeq(dds_ctx)
+contrasts_ctx <- c("group", "WT_cortex", "HD_cortex")
+res_ctx <- get_results(de_result_ctx, contrasts_ctx)
+DESeq2::plotDispEsts(de_result_ctx)
+plotMA_with_line(res_ctx)
 ```
 
 ```{r}
-res_striatum_sig <- res_striatum %>%
-  filter(padj < 0.1) %>%
-  arrange(padj) 
+res_ctx$gene_symbol <- get_gene_symbols(res_ctx)
+res_ctx_sig <- select_sig(res_ctx)
+save_result(res_ctx_sig, './out/GSE48963_ctx_12_sig.tsv')
 ```
 
+## Differential Expression in Striatum
+
 ```{r}
-res_striatum_sig %>%
-  write_delim('./out/GSE48963_str_12_sig.tsv')
+col_data_str <- col_data %>%
+  filter(tissue == "striatum")
+counts_str <- total_counts[, col_data_str %>% dplyr::select(title) %>% unlist()]
+
+dds_str <- DESeqDataSetFromMatrix(countData = counts_str,
+                                    colData = col_data_str,
+                                    design = ~ group)
+de_result_str <- DESeq(dds_str)
+contrasts_str <- c("group", "HD_striatum", "WT_striatum")
+res_str <- get_results(de_result_str, contrasts_str)
+DESeq2::plotDispEsts(de_result_str)
+plotMA_with_line(res_str)
 ```
 
-## Export for BETA analysis
 
 ```{r}
-res_striatum %>%
-  dplyr::select(gene_symbol, log2FoldChange, padj) %>%
-  write_delim('./out/GSE48963_str_12_all.tsv', delim = "\t", col_names = F)
-```
-
-
-## Cortext
-
-```{r}
-res_cortex <- results(de_result, lfcThreshold = 0.5, altHypothesis = "greaterAbs", contrast = contrasts_cortex) %>%
-  as.data.frame() %>%
-  drop_na()
-```
-
-```{r}
-res_cortex %>%
-  mutate(significant = padj < 0.1) %>%
-  dplyr::select(baseMean, log2FoldChange, significant) %>%
-  plotMA()
-
-abline(h=c(-0.5, 0.5), col="dodgerblue", lwd=2)
-```
-
-```{r}
-entrez_id <- rownames(res_cortex)
-res_cortex$gene_symbol <- mapIds(org.Mm.eg.db,
-                     keys = entrez_id,
-                     column = "SYMBOL",
-                     keytype = "ENTREZID",
-                     multiVals = "first")
-```
-
-```{r}
-res_cortex_sig <- res_cortex %>%
-  filter(padj < 0.1) %>%
-  arrange(padj) 
-```
-
-```{r}
-res_cortex %>%
-  dplyr::select(gene_symbol, log2FoldChange, padj) %>%
-  write_delim('./out/GSE48963_ctx_12_all.tsv', delim = "\t", col_names = F)
-```
-
-```{r}
-res_cortex_sig %>%
-  filter(padj < 0.1) %>%
-  dplyr::select(gene_symbol) %>%
-  write_delim('./out/GSE48963_ctx_12_sig_symbols.tsv', delim = "\t", col_names = F)
+res_str$gene_symbol <- get_gene_symbols(res_str)
+res_str_sig <- select_sig(res_str)
+save_result(res_str_sig, './out/GSE48963_str_12_sig.tsv')
 ```
 
 

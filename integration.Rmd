@@ -90,3 +90,7 @@ all_de_genes = list(
 upset(fromList(all_de_genes), order.by = "freq")
 ```
 
+```{r}
+Reduce(intersect, all_de_genes)
+```
+

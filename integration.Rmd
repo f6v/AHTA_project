@@ -8,65 +8,61 @@ library(tidyverse)
 library(ChIPpeakAnno)
 library(TxDb.Mmusculus.UCSC.mm9.knownGene)
 library(UpSetR)
+library(org.Mm.eg.db)
 ```
 
 
 ```{r}
-k9_summary <- readr::read_tsv('./data/GSE44854/epic2/AcH3K9_summary')
-head(k9_summary)
+k9 <- readr::read_tsv('./data/GSE44854/epic2/AcH3K9.tsv')
+k12 <- readr::read_tsv('./data/GSE44854/epic2/AcH4K12.tsv')
+
+#h3k4me3_12wks_str <- readr::read_tsv('./data/GSE48960/str_12/results/epic2/12_wks_str.tsv')
 ```
 
 ```{r}
-k9_summary %>%
-  filter(pvalue_B_vs_A < 1) %>%
-  ggplot(aes(x = log2(Fc_B_vs_A), y = -log10(pvalue_B_vs_A))) +
-    geom_point()
-```
-```{r}
-k9_summary %>%
-  filter(pvalue_A_vs_B < 1) %>%
-  ggplot(aes(x = log2(Fc_A_vs_B), y = -log10(pvalue_A_vs_B))) +
-    geom_point() +
-    xlim(-3, 3) +
-    ylim(0, 25)
+peaks_k9 <- toGRanges(k9 %>% filter(FDR_KO < 0.01))
+peaks_k12 <- toGRanges(k12 %>% filter(FDR_KO < 0.01))
 ```
 
 ```{r}
-h3k4me3_12wks_str <- readr::read_tsv('./data/GSE48960/str_12/results/epic2/12_wks_str.tsv')
+anno_data <- toGRanges(TxDb.Mmusculus.UCSC.mm9.knownGene)
 ```
 
 ```{r}
-h3k4me3_12wks_str %>%
-  filter(P_KO < 1) %>%
-  ggplot(aes(x = log2(FC_KO), y = -log10(P_KO))) +
-    geom_point()
+seqlevelsStyle(peaks_k9) <- seqlevelsStyle(anno_data)
+seqlevelsStyle(peaks_k12) <- seqlevelsStyle(anno_data)
+#anno <- annotatePeakInBatch(peaks_k9, AnnotationData = anno_data)
 ```
 
 ```{r}
-h3k4me3_12wks_str %>%
-  filter(FDR_KO < 0.00000001)
+k9_annotated <- annotatePeakInBatch(peaks_k9, AnnotationData = anno_data)
+k9_annotated$gene_symbol <- xget(k9_annotated$feature, org.Mm.egSYMBOL)
+
+k12_annotated <- annotatePeakInBatch(peaks_k12, AnnotationData = anno_data)
+k12_annotated$gene_symbol <- xget(k12_annotated$feature, org.Mm.egSYMBOL)
 ```
 
 ```{r}
-peaks <- toGRanges(h3k4me3_12wks_str %>% filter(FDR_KO < 0.1))
-```
-```{r}
-annoData <- toGRanges(TxDb.Mmusculus.UCSC.mm9.knownGene)
-```
-
-```{r}
-seqlevelsStyle(peaks) <- seqlevelsStyle(annoData)
-anno <- annotatePeakInBatch(peaks, AnnotationData=annoData)
+as.data.frame(table(k9_annotated$insideFeature)) %>%
+  ggplot(aes(x = reorder(Var1, -Freq), y = Freq)) +
+  geom_bar(stat = "identity", fill = ("#0072B2")) +
+  xlab("Feature") +
+  ylab("Count") +
+  theme_minimal()
 ```
 
 ```{r}
-anno <- annotatePeakInBatch(peaks, AnnotationData=annoData, 
-                  output="overlapping", 
-                  FeatureLocForDistance="TSS",
-                  bindingRegion=c(-2000, 3000))
-anno$symbol <- xget(anno$feature, org.Mm.egSYMBOL)
-head(anno)
+binOverFeature(k9_annotated, annotationData = anno_data,
+               radius=5000, nbins=50, FUN=length, errFun=0,
+               ylab="count", 
+               main="Distribution of aggregated peak numbers around TSS")
+
+binOverFeature(k12_annotated, annotationData = anno_data,
+               radius=5000, nbins=50, FUN=length, errFun=0,
+               ylab="count", 
+               main="Distribution of aggregated peak numbers around TSS")
 ```
+
 
 ### Transcriptional dysregulation
 
@@ -93,4 +89,81 @@ upset(fromList(all_de_genes), order.by = "freq")
 ```{r}
 Reduce(intersect, all_de_genes)
 ```
+
+
+```{r}
+filter_up <- rna_seq_ctx %>% 
+  dplyr::filter(log2FoldChange > 0) %>%
+  dplyr::select(entrez_id) %>%
+  pull()
+
+rna_seq_ctx_ranges_up <- as.data.frame(genes(TxDb.Mmusculus.UCSC.mm9.knownGene,
+                                             filter = list(gene_id = filter_up)))
+
+rna_seq_ctx_ranges_up %>%
+  dplyr::select(seqnames, start, end) %>%
+  write_delim('./out/GSE48963_ctx_12_sig_up.bed', delim = "\t", col_names = F)
+
+
+filter_down <- rna_seq_ctx %>% 
+  dplyr::filter(log2FoldChange < 0) %>%
+  dplyr::select(entrez_id) %>%
+  pull()
+
+rna_seq_ctx_ranges_down <- as.data.frame(genes(TxDb.Mmusculus.UCSC.mm9.knownGene,
+                                             filter = list(gene_id = filter_down)))
+rna_seq_ctx_ranges_down %>%
+  dplyr::select(seqnames, start, end) %>%
+  write_delim('./out/GSE48963_ctx_12_sig_down.bed', delim = "\t", col_names = F)
+```
+
+```{r}
+filter_up_str <- rna_seq_str %>% 
+  dplyr::filter(log2FoldChange > 0) %>%
+  dplyr::select(entrez_id) %>%
+  pull()
+
+rna_seq_str_ranges_up <- as.data.frame(genes(TxDb.Mmusculus.UCSC.mm9.knownGene,
+                                             filter = list(gene_id = filter_up_str)))
+
+rna_seq_str_ranges_up %>%
+  dplyr::select(seqnames, start, end) %>%
+  write_delim('./out/str_12_sig_up.bed', delim = "\t", col_names = F)
+
+
+filter_down_str <- rna_seq_str %>% 
+  dplyr::filter(log2FoldChange < 0) %>%
+  dplyr::select(entrez_id) %>%
+  pull()
+
+rna_seq_str_ranges_down <- as.data.frame(genes(TxDb.Mmusculus.UCSC.mm9.knownGene,
+                                             filter = list(gene_id = filter_down_str)))
+rna_seq_str_ranges_down %>%
+  dplyr::select(seqnames, start, end) %>%
+  write_delim('./out/str_12_sig_down.bed', delim = "\t", col_names = F)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

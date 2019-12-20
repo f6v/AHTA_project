@@ -106,32 +106,6 @@ ggplot(data_for_plot, aes(PC1, PC2)) +
   scale_color_manual(values = c("darkorange2", "dodgerblue4"))
 ```
 
-```{r}
-gene_annotation <- AnnotationDbi::select(mogene10sttranscriptcluster.db,
-                                  keys = (featureNames(data_norm)),
-                                  columns = c("SYMBOL", "GENENAME"),
-                                  keytype = "PROBEID") %>%
-  filter(!is.na(SYMBOL))
-
-# uniquely_mapped_probes <- gene_annotation %>%
-#   filter(!is.na(SYMBOL)) %>%
-#   group_by(PROBEID) %>%
-#   dplyr::summarize(no_of_matches = n_distinct(SYMBOL)) #%>%
-  # filter(no_of_matches == 1) %>%
-  # dplyr::select(PROBEID) %>%
-  # pull()
-
-# gene_annotation <- gene_annotation %>%
-#   filter(PROBEID %in% uniquely_mapped_probes)
-# 
-# probes_to_exclude <- (featureNames(data_norm) %in% uniquely_mapped_probes)
-# data_norm <-  BiocGenerics::subset(data_norm, !probes_to_exclude)
-# 
-# fData(data_norm)$PROBEID <- rownames(fData(data_norm))
-# fData(data_norm) <- left_join(fData(data_norm), gene_annotation)
-# # restore rownames after left_join
-# rownames(fData(data_norm)) <- fData(data_norm)$PROBEID
-```
 
 
 ### Design matrix and contrasts
@@ -197,25 +171,53 @@ res_20_sig <- top_results_annotated(fit, "diff_20")
 ### KEGG Pathways
 
 ```{r}
-topKEGG(kegga(res_10_sig$entrez_id, species = "Mm"), number = Inf)
+kegg_10 <- topKEGG(kegga(res_10_sig$entrez_id, species = "Mm"), number = Inf)
 ```
 
 ```{r}
-topKEGG(kegga(res_20_sig$entrez_id, species = "Mm"), number = Inf)
+kegg_10 %>%
+  head(7) %>%
+  ggplot(aes(x = reorder(Pathway, N), y = N, fill = P.DE)) +
+      scale_fill_gradient(low = "blue", high = "red") +
+      geom_bar(stat = 'identity') +
+      labs(x = "Pathway", y = "Number of genes in set", fill = "p-value") +
+      coord_flip() +
+      theme_minimal()
+```
+
+
+```{r}
+kegg_20 <- topKEGG(kegga(res_20_sig$entrez_id, species = "Mm"), number = Inf)
+```
+
+```{r}
+kegg_20 %>%
+  head(7) %>%
+  ggplot(aes(x = reorder(Pathway, N), y = N, fill = P.DE)) +
+      scale_fill_gradient(low = "blue", high = "red") +
+      geom_bar(stat = 'identity') +
+      labs(x = "Pathway", y = "Number of genes in set", fill = "p-value") +
+      coord_flip() +
+      theme_minimal()
 ```
 
 ### Save results
 
 ```{r}
 res_10_sig %>%
-  dplyr::select(logFC, adj.P.Val, gene_symbol) %>%
   write_delim('./out/GSE44855_hip_10_sig.tsv', delim = "\t", col_names = T)
 
 res_20_sig %>%
-  dplyr::select(logFC, adj.P.Val, gene_symbol) %>%
   write_delim('./out/GSE44855_hip_20_sig.tsv', delim = "\t", col_names = T)
 ```
 
+```{r}
+kegg_10 %>%
+  write_delim('./out/GSE44855_hip_10_kegg.tsv', delim = "\t", col_names = T)
+
+kegg_20 %>%
+  write_delim('./out/GSE44855_hip_20_kegg.tsv', delim = "\t", col_names = T)
+```
 
 
 

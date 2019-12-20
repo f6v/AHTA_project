@@ -132,14 +132,15 @@ get_results <- function(res, contrasts) {
   )
 }
 
-get_gene_symbols <-function(res) {
-  return (
-    mapIds(org.Mm.eg.db,
-           keys = rownames(res),
-           column = "SYMBOL",
-           keytype = "ENTREZID",
-           multiVals = "first")
-  )
+add_gene_symbols <-function(res) {
+  res$gene_symbol <- mapIds(org.Mm.eg.db,
+                       keys = rownames(res),
+                       column = "SYMBOL",
+                       keytype = "ENTREZID",
+                       multiVals = "first")
+  res$entrez_id <- rownames(res)
+  
+  return(res)
 }
 
 select_sig <- function(res) {
@@ -152,7 +153,7 @@ select_sig <- function(res) {
 
 save_result <- function(res, out_file) {
   res %>%
-    dplyr::select(gene_symbol, log2FoldChange, padj) %>%
+    dplyr::select(entrez_id, gene_symbol, log2FoldChange, padj) %>%
     write_delim(out_file, delim = "\t", col_names = T)
 }
 ```
@@ -175,7 +176,7 @@ plotMA_with_line(res_ctx)
 ```
 
 ```{r}
-res_ctx$gene_symbol <- get_gene_symbols(res_ctx)
+res_ctx <- add_gene_symbols(res_ctx)
 res_ctx_sig <- select_sig(res_ctx)
 save_result(res_ctx_sig, './out/GSE48963_ctx_12_sig.tsv')
 ```
@@ -199,7 +200,7 @@ plotMA_with_line(res_str)
 
 
 ```{r}
-res_str$gene_symbol <- get_gene_symbols(res_str)
+res_str <- add_gene_symbols(res_str)
 res_str_sig <- select_sig(res_str)
 save_result(res_str_sig, './out/GSE48963_str_12_sig.tsv')
 ```
